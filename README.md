@@ -1,68 +1,170 @@
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+# 配置 React 源码的本地调试环境
 
-## Available Scripts
+1. creat-react-app <项目名称>
+2. yarn run eject
+3. clone 官方源码（目前是 master latest）小版本可能会有些许异同，可以根据命令行的报错信息再去搜索（镜像 react 仓库，clone 慢的可以使用这个）
 
-In the project directory, you can run:
+###### 根目录中执行
+```shell
+git clone --depth=1 https://github.com.cnpmjs.org/facebook/react.git src/react
+```
 
-### `yarn start`
+# 修改相关配置
 
-Runs the app in the development mode.<br />
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+1. 链接本地源码
+`react/config/webpack.config.js`
 
-The page will reload if you make edits.<br />
-You will also see any lint errors in the console.
+```diff
+resolve: {
+    alias: {
+        'react-native': 'react-native-web',
+-       ...(isEnvProductionProfile && {
+-         'react-dom$': 'react-dom/profiling',
+-         'scheduler/tracing': 'scheduler/tracing-profiling',
+-       }),
+-       ...(modules.webpackAliases || {}),
+        
++        'react': path.resolve(__dirname, '../src/react/packages/react'),
++        'react-dom': path.resolve(__dirname, '../src/react/packages/react-dom'),
++        'shared': path.resolve(__dirname, '../src/react/packages/shared'),
++        'react-reconciler': path.resolve(__dirname, '../src/react/packages/react-reconciler'),
+         'react-events': path.resolve(__dirname, '../src/react/packages/events')
+    }
+}
+```
 
-### `yarn test`
+2. 修改环境变量
 
-Launches the test runner in the interactive watch mode.<br />
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+> 这一步不同版本中可能会出现变量不对等的情况
+> 如有报错可以看下源码中的 `.eslintrc.js` 里面的 `globals` 属性
 
-### `yarn build`
+`react/config/env.js`
 
-Builds the app for production to the `build` folder.<br />
-It correctly bundles React in production mode and optimizes the build for the best performance.
+```diff
+  const stringified = {
+    ....,
+    
++    __DEV__: true,
++    SharedArrayBuffer: true,
++    spyOnDev: true,
++    spyOnDevAndProd: true,
++    spyOnProd: true,
++    __PROFILE__: true,
++    __UMD__: true,
++    __EXPERIMENTAL__: true,
++    __VARIANT__: true,
++    gate: true,
++    trustedTypes: true,
+  };
 
-The build is minified and the filenames include the hashes.<br />
-Your app is ready to be deployed!
+```
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+2.1 项目根目录中创建 `.eslintrc.json` 文件
 
-### `yarn eject`
+```json
+{
+  "extends": "react-app",
+  "globals": {
+    "SharedArrayBuffer": true,
 
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
+    "spyOnDev": true,
+    "spyOnDevAndProd": true,
+    "spyOnProd": true,
+    "__PROFILE__": true,
+    "__UMD__": true,
+    "__EXPERIMENTAL__": true,
+    "__VARIANT__": true,
+    "gate": true,
+    "trustedTypes": true
+  }
+}
+```
+3. 忽略 `flow`
+> webstrom 中可自动识别 flow，其他编辑器可能需要下载插件 
 
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+```shell
+yarn add @babel/plugin-transform-flow-strip-types -D
+```
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
+3.1 添加配置
 
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
+`react/config/webpack.config.js[babel-loader]`
 
-## Learn More
+```diff
+plugins: [
++ require.resolve('@babel/plugin-transform-flow-strip-types'),
+  [
+    require.resolve('babel-plugin-named-asset-import'),
+    {
+      loaderMap: {
+        svg: {
+          ReactComponent:
+            '@svgr/webpack?-svgo,+titleProp,+ref![path]',
+        },
+      },
+    },
+  ],
+],
+```
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+4. 导出 `HostConfig`
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+修改文件`/react/packages/react-reconciler/src/ReactFiberHostConfig.js`。
 
-### Code Splitting
+```diff
+- invariant(false, 'This module must be shimmed by a specific renderer.');
++ export * from './forks/ReactFiberHostConfig.dom'
+```
 
-This section has moved here: https://facebook.github.io/create-react-app/docs/code-splitting
+4.1 修改文件`/react/packages/shared/ReactSharedInternals.js`。`react`此时未`export`内容，直接从`ReactSharedInternals`拿值
 
-### Analyzing the Bundle Size
 
-This section has moved here: https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size
+```diff
+- import * as React from 'react';
 
-### Making a Progressive Web App
+- const ReactSharedInternals =
+-   React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED;
 
-This section has moved here: https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app
++ import ReactSharedInternals from '../react/src/ReactSharedInternals'
 
-### Advanced Configuration
+export default ReactSharedInternals;
+```
 
-This section has moved here: https://facebook.github.io/create-react-app/docs/advanced-configuration
+4.2 关闭 `eslint` 扩展
 
-### Deployment
+`/react/.eslingrc.js[module.exports]`
 
-This section has moved here: https://facebook.github.io/create-react-app/docs/deployment
+```diff
+  extends: [
+-   'fbjs',
+    'prettier'
+  ],
+```
 
-### `yarn build` fails to minify
+# 相关报错
 
-This section has moved here: https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify
+## invariant
+
+```
+Error: Internal React error: invariant() is meant to be replaced at compile time. There is no runtime version.
+```
+解决
+
+
+```diff
+
+export default function invariant(condition, format, a, b, c, d, e, f) {
++  return;
+
+  throw new Error(
+    'Internal React error: invariant() is meant to be replaced at compile ' +
+      'time. There is no runtime version.',
+  );
+}
+
+```
+
+# 完结撒花
+
+- gihub [源码地址](https://github.com/Kshao123/react-source)
+- 版本更新复制 clone 代码即可，建议 pull，避免代码覆盖问题
